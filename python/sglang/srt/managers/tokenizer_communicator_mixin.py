@@ -41,6 +41,8 @@ from sglang.srt.managers.io_struct import (
     ExpertDistributionReqType,
     FlushCacheReqInput,
     FlushCacheReqOutput,
+    HiCacheExistsByTokensReqInput,
+    HiCacheExistsByTokensReqOutput,
     GetInternalStateReq,
     GetInternalStateReqOutput,
     GetLoadReqInput,
@@ -219,6 +221,9 @@ class TokenizerCommunicatorMixin:
         self.pin_prefix_communicator = _Communicator(
             self.send_to_scheduler, server_args.dp_size
         )
+        self.hicache_exists_by_tokens_communicator = _Communicator(
+            self.send_to_scheduler, server_args.dp_size
+        )
         self.profile_communicator = _Communicator(
             self.send_to_scheduler, server_args.dp_size
         )
@@ -312,6 +317,10 @@ class TokenizerCommunicatorMixin:
                 (
                     PinPrefixReqOutput,
                     self.pin_prefix_communicator.handle_recv,
+                ),
+                (
+                    HiCacheExistsByTokensReqOutput,
+                    self.hicache_exists_by_tokens_communicator.handle_recv,
                 ),
                 (
                     FlushCacheReqOutput,
@@ -428,6 +437,69 @@ class TokenizerCommunicatorMixin:
         total = sum(r.nodes_pinned for r in results)
         return PinPrefixReqOutput(
             success=all_success, nodes_pinned=total, message=all_message
+        )
+
+    async def hicache_exists_by_tokens(
+        self: TokenizerManager,
+        token_ids: List[int],
+        extra_key: Optional[str] = None,
+    ) -> HiCacheExistsByTokensReqOutput:
+        """Check logical HiCache page existence in L3 for a page-aligned prefix."""
+        self.auto_create_handle_loop()
+        results = await self.hicache_exists_by_tokens_communicator(
+            HiCacheExistsByTokensReqInput(token_ids=token_ids, extra_key=extra_key)
+        )
+
+        all_success, all_message = _Communicator.merge_results(results)
+        if not all_success:
+            return HiCacheExistsByTokensReqOutput(
+                success=False, input_token_count=len(token_ids), message=all_message
+            )
+
+        if not results:
+            return HiCacheExistsByTokensReqOutput(
+                success=False,
+                input_token_count=len(token_ids),
+                message="No scheduler result returned.",
+            )
+
+        first = results[0]
+        merged_exists = list(first.exists)
+        for result in results[1:]:
+            if (
+                result.page_size != first.page_size
+                or result.input_token_count != first.input_token_count
+                or result.aligned_token_count != first.aligned_token_count
+                or result.page_hashes != first.page_hashes
+                or len(result.exists) != len(merged_exists)
+            ):
+                return HiCacheExistsByTokensReqOutput(
+                    success=False,
+                    input_token_count=len(token_ids),
+                    message=(
+                        "Inconsistent HiCache exists-by-tokens results across schedulers."
+                    ),
+                )
+            merged_exists = [
+                lhs and rhs for lhs, rhs in zip(merged_exists, result.exists)
+            ]
+
+        longest_prefix_pages = 0
+        for page_exists in merged_exists:
+            if not page_exists:
+                break
+            longest_prefix_pages += 1
+
+        return HiCacheExistsByTokensReqOutput(
+            success=True,
+            page_size=first.page_size,
+            input_token_count=first.input_token_count,
+            aligned_token_count=first.aligned_token_count,
+            page_hashes=first.page_hashes,
+            exists=merged_exists,
+            longest_prefix_pages=longest_prefix_pages,
+            longest_prefix_tokens=longest_prefix_pages * first.page_size,
+            message="",
         )
 
     async def start_profile(

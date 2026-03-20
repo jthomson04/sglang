@@ -23,6 +23,10 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     MatchPrefixParams,
     MatchResult,
 )
+from sglang.srt.mem_cache.hicache_query_utils import (
+    HiCacheExistsByTokensResult,
+    query_hicache_exists_by_tokens,
+)
 from sglang.srt.mem_cache.mamba_radix_cache import (
     MambaRadixCache,
     TreeNode,
@@ -1219,6 +1223,20 @@ class HiMambaRadixCache(MambaRadixCache):
         if hasattr(self, "storage_metrics_collector"):
             self.storage_metrics_collector = None
         return True, "Detached HiCache storage backend successfully."
+
+    def exists_by_tokens(
+        self, token_ids: List[int], extra_key: Optional[str] = None
+    ) -> HiCacheExistsByTokensResult:
+        if not self.enable_storage or self.cache_controller.storage_backend is None:
+            raise RuntimeError("HiCache storage backend is not enabled.")
+
+        return query_hicache_exists_by_tokens(
+            token_ids=token_ids,
+            page_size=self.page_size,
+            storage_backend=self.cache_controller.storage_backend,
+            is_eagle=getattr(self, "is_eagle", False),
+            extra_key=extra_key,
+        )
 
     def _force_release_pending_storage_ops(self):
         cc = self.cache_controller

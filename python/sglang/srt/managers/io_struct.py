@@ -1244,6 +1244,27 @@ class PinPrefixReqOutput(BaseReq):
 
 
 @dataclass
+class HiCacheExistsByTokensReqInput(BaseReq):
+    """Check whether the page-aligned prefix pages for token_ids exist in L3."""
+
+    token_ids: List[int] = field(default_factory=list)
+    extra_key: Optional[str] = None
+
+
+@dataclass
+class HiCacheExistsByTokensReqOutput(BaseReq):
+    success: bool
+    page_size: int = 0
+    input_token_count: int = 0
+    aligned_token_count: int = 0
+    page_hashes: List[str] = field(default_factory=list)
+    exists: List[bool] = field(default_factory=list)
+    longest_prefix_pages: int = 0
+    longest_prefix_tokens: int = 0
+    message: str = ""
+
+
+@dataclass
 class PauseGenerationReqInput(BaseReq):
     """
     Note that the PauseGenerationRequests is only supported in SGLang Server.

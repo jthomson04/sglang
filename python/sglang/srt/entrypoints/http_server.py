@@ -118,6 +118,7 @@ from sglang.srt.managers.io_struct import (
     DumperControlReqInput,
     EmbeddingReqInput,
     GenerateReqInput,
+    HiCacheExistsByTokensReqInput,
     GetWeightsByNameReqInput,
     InitWeightsSendGroupForRemoteInstanceReqInput,
     InitWeightsUpdateGroupReqInput,
@@ -866,6 +867,31 @@ async def pin_prefix(obj: PinPrefixReqInput):
         content={
             "status": "ok" if ret.success else "error",
             "nodes_pinned": ret.nodes_pinned,
+            "message": ret.message,
+        },
+        status_code=200 if ret.success else HTTPStatus.BAD_REQUEST,
+    )
+
+
+@app.api_route("/hicache/exists_by_tokens", methods=["POST"])
+@auth_level(AuthLevel.ADMIN_OPTIONAL)
+async def hicache_exists_by_tokens(obj: HiCacheExistsByTokensReqInput):
+    """Check whether the page-aligned prefix pages for token_ids exist in L3."""
+    if not _global_state.tokenizer_manager.server_args.admin_api_key:
+        return _admin_api_key_missing_response()
+    ret = await _global_state.tokenizer_manager.hicache_exists_by_tokens(
+        obj.token_ids, obj.extra_key
+    )
+    return ORJSONResponse(
+        content={
+            "status": "ok" if ret.success else "error",
+            "page_size": ret.page_size,
+            "input_token_count": ret.input_token_count,
+            "aligned_token_count": ret.aligned_token_count,
+            "page_hashes": ret.page_hashes,
+            "exists": ret.exists,
+            "longest_prefix_pages": ret.longest_prefix_pages,
+            "longest_prefix_tokens": ret.longest_prefix_tokens,
             "message": ret.message,
         },
         status_code=200 if ret.success else HTTPStatus.BAD_REQUEST,

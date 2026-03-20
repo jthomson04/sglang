@@ -26,6 +26,10 @@ from sglang.srt.mem_cache.base_prefix_cache import (
     MatchPrefixParams,
     MatchResult,
 )
+from sglang.srt.mem_cache.hicache_query_utils import (
+    HiCacheExistsByTokensResult,
+    query_hicache_exists_by_tokens,
+)
 from sglang.srt.mem_cache.memory_pool import (
     MHATokenToKVPool,
     MLATokenToKVPool,
@@ -631,6 +635,20 @@ class HiRadixCache(RadixCache):
         else:
             logger.warning("Hierarchical cache storage backend is not enabled.")
             return False
+
+    def exists_by_tokens(
+        self, token_ids: List[int], extra_key: Optional[str] = None
+    ) -> HiCacheExistsByTokensResult:
+        if not self.enable_storage or self.cache_controller.storage_backend is None:
+            raise RuntimeError("HiCache storage backend is not enabled.")
+
+        return query_hicache_exists_by_tokens(
+            token_ids=token_ids,
+            page_size=self.page_size,
+            storage_backend=self.cache_controller.storage_backend,
+            is_eagle=self.is_eagle,
+            extra_key=extra_key,
+        )
 
     def write_backup(self, node: TreeNode, write_back=False):
         host_indices = self.cache_controller.write(

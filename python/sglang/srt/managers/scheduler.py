@@ -103,6 +103,8 @@ from sglang.srt.managers.io_struct import (
     FlushCacheReqInput,
     FlushCacheReqOutput,
     FreezeGCReq,
+    HiCacheExistsByTokensReqInput,
+    HiCacheExistsByTokensReqOutput,
     GetInternalStateReq,
     GetInternalStateReqOutput,
     GetLoadReqInput,
@@ -1163,6 +1165,10 @@ class Scheduler(
                 (AttachHiCacheStorageReqInput, self.attach_hicache_storage_wrapped),
                 (DetachHiCacheStorageReqInput, self.detach_hicache_storage_wrapped),
                 (PinPrefixReqInput, self.pin_prefix_wrapped),
+                (
+                    HiCacheExistsByTokensReqInput,
+                    self.hicache_exists_by_tokens_wrapped,
+                ),
                 (AbortReq, self.abort_request),
                 (OpenSessionReqInput, self.open_session),
                 (CloseSessionReqInput, self.close_session),
@@ -2873,6 +2879,49 @@ class Scheduler(
             success=True,
             nodes_pinned=nodes_pinned,
             message=msg,
+        )
+
+    def hicache_exists_by_tokens_wrapped(
+        self, recv_req: HiCacheExistsByTokensReqInput
+    ) -> HiCacheExistsByTokensReqOutput:
+        if not self.enable_hierarchical_cache:
+            return HiCacheExistsByTokensReqOutput(
+                success=False,
+                input_token_count=len(recv_req.token_ids),
+                message="Hierarchical cache is not enabled.",
+            )
+
+        if not hasattr(self.tree_cache, "exists_by_tokens"):
+            return HiCacheExistsByTokensReqOutput(
+                success=False,
+                input_token_count=len(recv_req.token_ids),
+                message=(
+                    "Current tree_cache implementation does not support exists-by-tokens."
+                ),
+            )
+
+        try:
+            result = self.tree_cache.exists_by_tokens(
+                recv_req.token_ids, recv_req.extra_key
+            )
+        except Exception as e:
+            logger.exception("HiCache exists-by-tokens failed with exception.")
+            return HiCacheExistsByTokensReqOutput(
+                success=False,
+                input_token_count=len(recv_req.token_ids),
+                message=str(e),
+            )
+
+        return HiCacheExistsByTokensReqOutput(
+            success=True,
+            page_size=result.page_size,
+            input_token_count=result.input_token_count,
+            aligned_token_count=result.aligned_token_count,
+            page_hashes=result.page_hashes,
+            exists=result.exists,
+            longest_prefix_pages=result.longest_prefix_pages,
+            longest_prefix_tokens=result.longest_prefix_tokens,
+            message="",
         )
 
     def flush_cache(self):
