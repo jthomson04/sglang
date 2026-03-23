@@ -768,36 +768,45 @@ class MooncakeStore(HiCacheStorage, MooncakeBaseStore):
         exist_result = self._batch_exist([key])
         return exist_result[0] == 1
 
-    def batch_exists(
-        self, keys, extra_info: Optional[HiCacheStorageExtraInfo] = None
-    ) -> int:
+    def _get_exists_query_keys(self, keys: List[str]) -> List[str]:
         # Apply extra_backend_tag prefix if available
         if self.extra_backend_tag is not None:
             prefix = self.extra_backend_tag
             keys = [f"{prefix}_{key}" for key in keys]
 
         if self.is_mla_backend:
-            query_keys = [f"{key}_{self.mla_suffix}_k" for key in keys]
-            key_multiplier = 1
-        else:
-            query_keys = []
-            if self.storage_config.should_split_heads:
-                for key in keys:
-                    for suffix in self.mha_suffix:
-                        query_keys.append(f"{key}_{suffix}_k")
-                        query_keys.append(f"{key}_{suffix}_v")
-                key_multiplier = 2 * self.split_factor
-            else:
-                for key in keys:
-                    query_keys.append(f"{key}_{self.mha_suffix}_k")
-                    query_keys.append(f"{key}_{self.mha_suffix}_v")
-                key_multiplier = 2
+            return [f"{key}_{self.mla_suffix}_k" for key in keys]
 
+        query_keys = []
+        if self.storage_config.should_split_heads:
+            for key in keys:
+                for suffix in self.mha_suffix:
+                    query_keys.append(f"{key}_{suffix}_k")
+                    query_keys.append(f"{key}_{suffix}_v")
+        else:
+            for key in keys:
+                query_keys.append(f"{key}_{self.mha_suffix}_k")
+                query_keys.append(f"{key}_{self.mha_suffix}_v")
+        return query_keys
+
+    def batch_exists(
+        self, keys, extra_info: Optional[HiCacheStorageExtraInfo] = None
+    ) -> int:
+        exists_mask = self.batch_exists_mask(keys, extra_info)
+        for i, exists in enumerate(exists_mask):
+            if not exists:
+                return i
+        return len(exists_mask)
+
+    def batch_exists_mask(
+        self, keys, extra_info: Optional[HiCacheStorageExtraInfo] = None
+    ) -> List[bool]:
+        if len(keys) == 0:
+            return []
+
+        query_keys = self._get_exists_query_keys(keys)
         exist_result = self._batch_exist(query_keys)
-        for i in range(len(query_keys)):
-            if exist_result[i] != 1:
-                return i // key_multiplier
-        return len(query_keys) // key_multiplier
+        return self._batch_postprocess(exist_result, is_set_operate=False)
 
     def close(self):
         # MooncakeDistributedStore will automatically call the destructor, so

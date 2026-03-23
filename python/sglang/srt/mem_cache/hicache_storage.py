@@ -178,6 +178,18 @@ class HiCacheStorage(ABC):
                 return i
         return len(keys)
 
+    def batch_exists_mask(
+        self, keys: List[str], extra_info: Optional[HiCacheStorageExtraInfo] = None
+    ) -> List[bool]:
+        """
+        Check if the keys exist in the storage and return a per-key mask.
+
+        Backends can override this to issue a single batched query and preserve
+        non-prefix hits. The default fallback keeps compatibility by probing
+        each key independently.
+        """
+        return [self.exists(key) for key in keys]
+
     def clear(self) -> None:
         pass
 

@@ -13,6 +13,24 @@ from sglang.srt.mem_cache.hicache_storage import get_hash_str
 class FakeStorageBackend:
     def __init__(self, existing_hashes):
         self.existing_hashes = set(existing_hashes)
+        self.batch_exists_calls = []
+        self.batch_exists_mask_calls = []
+
+    def batch_exists(self, keys, extra_info=None):
+        self.batch_exists_calls.append((list(keys), extra_info))
+        for i, key in enumerate(keys):
+            if key not in self.existing_hashes:
+                return i
+        return len(keys)
+
+    def batch_exists_mask(self, keys, extra_info=None):
+        self.batch_exists_mask_calls.append((list(keys), extra_info))
+        return [key in self.existing_hashes for key in keys]
+
+
+class PrefixOnlyStorageBackend:
+    def __init__(self, existing_hashes):
+        self.existing_hashes = set(existing_hashes)
         self.calls = []
 
     def batch_exists(self, keys, extra_info=None):
@@ -24,7 +42,7 @@ class FakeStorageBackend:
 
 
 class TestHiCacheQueryUtils(unittest.TestCase):
-    def test_exists_by_tokens_returns_per_page_results(self):
+    def test_exists_by_tokens_uses_batch_exists_mask(self):
         page_size = 4
         token_ids = list(range(1, 11))
         hash_0 = get_hash_str(token_ids[:4])
@@ -44,6 +62,27 @@ class TestHiCacheQueryUtils(unittest.TestCase):
         self.assertEqual(result.exists, [True, False])
         self.assertEqual(result.longest_prefix_pages, 1)
         self.assertEqual(result.longest_prefix_tokens, 4)
+        self.assertEqual(backend.batch_exists_calls, [])
+        self.assertEqual(
+            backend.batch_exists_mask_calls,
+            [([hash_0, hash_1], None)],
+        )
+
+    def test_exists_by_tokens_falls_back_to_prefix_api(self):
+        page_size = 4
+        token_ids = list(range(1, 11))
+        hash_0 = get_hash_str(token_ids[:4])
+        hash_1 = get_hash_str(token_ids[4:8], prior_hash=hash_0)
+        backend = PrefixOnlyStorageBackend({hash_0})
+
+        result = query_hicache_exists_by_tokens(
+            token_ids=token_ids,
+            page_size=page_size,
+            storage_backend=backend,
+        )
+
+        self.assertEqual(result.page_hashes, [hash_0, hash_1])
+        self.assertEqual(result.exists, [True, False])
         self.assertEqual(backend.calls, [([hash_0], None), ([hash_1], None)])
 
     def test_exists_by_tokens_handles_short_prefix(self):
@@ -61,7 +100,8 @@ class TestHiCacheQueryUtils(unittest.TestCase):
         self.assertEqual(result.exists, [])
         self.assertEqual(result.longest_prefix_pages, 0)
         self.assertEqual(result.longest_prefix_tokens, 0)
-        self.assertEqual(backend.calls, [])
+        self.assertEqual(backend.batch_exists_calls, [])
+        self.assertEqual(backend.batch_exists_mask_calls, [])
 
     def test_exists_by_tokens_supports_eagle_bigram_keys(self):
         token_ids = [10, 11, 12, 13, 14]

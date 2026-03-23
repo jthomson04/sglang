@@ -39,14 +39,27 @@ def query_hicache_exists_by_tokens(
     aligned_tokens = page_align_keys(query_tokens, page_size)
 
     page_hashes: List[str] = []
-    exists: List[bool] = []
     last_hash = None
 
     for start in range(0, len(aligned_tokens), page_size):
         page_tokens = aligned_tokens[start : start + page_size]
         last_hash = get_hash_str(page_tokens, prior_hash=last_hash)
         page_hashes.append(last_hash)
-        exists.append(storage_backend.batch_exists([last_hash]) == 1)
+
+    if not page_hashes:
+        exists = []
+    elif hasattr(storage_backend, "batch_exists_mask"):
+        exists = list(storage_backend.batch_exists_mask(page_hashes))
+    else:
+        exists = [
+            storage_backend.batch_exists([page_hash]) == 1
+            for page_hash in page_hashes
+        ]
+
+    if len(exists) != len(page_hashes):
+        raise ValueError(
+            "HiCache storage backend returned an invalid exists mask length."
+        )
 
     longest_prefix_pages = 0
     for page_exists in exists:
